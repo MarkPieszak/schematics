@@ -26,6 +26,11 @@
       "description": "Create a Nest decorator.",
       "schema": "./lib/decorator/schema.json"
     },
+    "feature": {
+      "factory": "./lib/feature/feature.factory#main",
+      "description": "Create a Nest Feature.",
+      "schema": "./lib/feature/schema.json"
+    },
     "filter": {
       "factory": "./lib/filter/filter.factory#main",
       "description": "Create a Nest filter.",

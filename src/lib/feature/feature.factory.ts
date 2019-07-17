@@ -3,8 +3,10 @@ import {
   apply,
   branchAndMerge,
   chain,
+  filter,
   mergeWith,
   move,
+  noop,
   Rule,
   SchematicContext,
   template,
@@ -18,37 +20,51 @@ import {
 import { ModuleFinder } from '../../utils/module.finder';
 import { Location, NameParser } from '../../utils/name.parser';
 import { mergeSourceRoot } from '../../utils/source-root.helpers';
-import { ModuleOptions } from './module.schema';
+import { DEFAULT_LANGUAGE } from '../defaults';
+import { FeatureOptions } from './feature.schema';
 
-export function main(options: ModuleOptions): Rule {
-  console.log('did module get called??')
+// import { main as mainModule } from '../module/module.factory';
+// import { main as mainService } from '../service/service.factory';
+
+const ELEMENT_METADATA = 'controllers';
+const ELEMENT_TYPE = 'controller';
+
+export function main(options: FeatureOptions): Rule {
+  // to-do 
+  // conditional logic / options for if someone doesn't want some of the files that get created?
   options = transform(options);
   return (tree: Tree, context: SchematicContext) => {
     return branchAndMerge(
       chain([
         mergeSourceRoot(options),
-        addDeclarationToModule(options),
         mergeWith(generate(options)),
+        addDeclarationToModule(options),
       ]),
     )(tree, context);
   };
 }
 
-function transform(source: ModuleOptions): ModuleOptions {
-  const target: ModuleOptions = Object.assign({}, source);
-  target.metadata = 'imports';
-  target.type = 'module';
+function transform(source: FeatureOptions): FeatureOptions {
+  const target: FeatureOptions = Object.assign({}, source);
+  target.metadata = ELEMENT_METADATA;
+  target.type = ELEMENT_TYPE;
 
   const location: Location = new NameParser().parse(target);
   target.name = strings.dasherize(location.name);
-  target.path = join(strings.dasherize(location.path) as Path, target.name);
-  target.language = target.language !== undefined ? target.language : 'ts';
+  target.path = strings.dasherize(location.path);
+  target.language =
+    target.language !== undefined ? target.language : DEFAULT_LANGUAGE;
+
+  target.path = target.flat
+    ? target.path
+    : join(target.path as Path, target.name);
   return target;
 }
 
-function generate(options: ModuleOptions) {
+function generate(options: FeatureOptions) {
   return (context: SchematicContext) =>
     apply(url(join('./files' as Path, options.language)), [
+      options.spec ? noop() : filter(path => !path.endsWith('.spec.ts')),
       template({
         ...strings,
         ...options,
@@ -57,7 +73,7 @@ function generate(options: ModuleOptions) {
     ])(context);
 }
 
-function addDeclarationToModule(options: ModuleOptions): Rule {
+function addDeclarationToModule(options: FeatureOptions): Rule {
   return (tree: Tree) => {
     if (options.skipImport !== undefined && options.skipImport) {
       return tree;
