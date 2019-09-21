@@ -18,7 +18,12 @@ import {
   Tree,
   url,
 } from '@angular-devkit/schematics';
-import { DEFAULT_LANGUAGE, DEFAULT_LIB_PATH } from '../defaults';
+import {
+  DEFAULT_LANGUAGE,
+  DEFAULT_LIB_PATH,
+  DEFAULT_PATH_NAME,
+  PROJECT_TYPE,
+} from '../defaults';
 import { LibraryOptions } from './library.schema';
 
 type UpdateJsonFn<T> = (obj: T) => T | void;
@@ -34,8 +39,9 @@ interface TsConfigPartialType {
 export function main(options: LibraryOptions): Rule {
   options = transform(options);
   return chain([
-    updateTsConfig(options.name, options.prefix, options.path),
     addLibraryToCliOptions(options.path, options.name),
+    updatePackageJson(options),
+    updateTsConfig(options.name, options.prefix, options.path),
     branchAndMerge(mergeWith(generate(options))),
   ]);
 }
@@ -59,6 +65,85 @@ function transform(options: LibraryOptions): LibraryOptions {
   return target;
 }
 
+function updatePackageJson(options: LibraryOptions) {
+  const distRoot = join(options.path as Path, options.name, 'src');
+  const packageKey = options.prefix
+    ? options.prefix + '/' + options.name
+    : options.name;
+
+  return (host: Tree) => {
+    if (!host.exists('package.json')) {
+      return host;
+    }
+    return updateJsonFile(
+      host,
+      'package.json',
+      (packageJson: Record<string, any>) => {
+        updateNpmScripts(packageJson.scripts, options);
+        updateJestConfig(packageJson.jest, options, packageKey, distRoot);
+      },
+    );
+  };
+}
+
+function updateJestConfig(
+  jestOptions: Record<string, any>,
+  options: LibraryOptions,
+  packageKey: string,
+  distRoot: string,
+) {
+  if (!jestOptions) {
+    return;
+  }
+  if (jestOptions.rootDir === DEFAULT_PATH_NAME) {
+    jestOptions.rootDir = '.';
+    jestOptions.coverageDirectory = './coverage';
+  }
+  const defaultSourceRoot =
+    options.rootDir !== undefined ? options.rootDir : DEFAULT_LIB_PATH;
+
+  const jestSourceRoot = `<rootDir>/${defaultSourceRoot}/`;
+  if (!jestOptions.roots) {
+    jestOptions.roots = ['<rootDir>/src/', jestSourceRoot];
+  } else if (jestOptions.roots.indexOf(jestSourceRoot) < 0) {
+    jestOptions.roots.push(jestSourceRoot);
+  }
+
+  if (!jestOptions.moduleNameMapper) {
+    jestOptions.moduleNameMapper = {};
+  }
+  const deepPackagePath = packageKey + '/(.*)';
+  jestOptions.moduleNameMapper[deepPackagePath] = join(
+    '<rootDir>' as Path,
+    distRoot,
+    '$1',
+  );
+}
+
+function updateNpmScripts(
+  scripts: Record<string, any>,
+  options: LibraryOptions,
+) {
+  if (!scripts) {
+    return;
+  }
+  const defaultFormatScriptName = 'format';
+  if (!scripts[defaultFormatScriptName]) {
+    return;
+  }
+
+  if (
+    scripts[defaultFormatScriptName] &&
+    scripts[defaultFormatScriptName].indexOf(DEFAULT_PATH_NAME) >= 0
+  ) {
+    const defaultSourceRoot =
+      options.rootDir !== undefined ? options.rootDir : DEFAULT_LIB_PATH;
+    scripts[
+      defaultFormatScriptName
+    ] = `prettier --write "src/**/*.ts" "test/**/*.ts" "${defaultSourceRoot}/**/*.ts"`;
+  }
+}
+
 function updateJsonFile<T>(
   host: Tree,
   path: string,
@@ -71,7 +156,6 @@ function updateJsonFile<T>(
     callback((json as {}) as T);
     host.overwrite(path, JSON.stringify(json, null, 2));
   }
-
   return host;
 }
 
@@ -121,16 +205,23 @@ function addLibraryToCliOptions(
   projectRoot: string,
   projectName: string,
 ): Rule {
+  const rootPath = join(projectRoot as Path, projectName);
   const project = {
-    root: join(projectRoot as Path, projectName),
-    sourceRoot: join(projectRoot as Path, projectName, 'src'),
+    type: PROJECT_TYPE.LIBRARY,
+    root: rootPath,
+    entryFile: 'index',
+    sourceRoot: join(rootPath, 'src'),
+    compilerOptions: {
+      tsConfigPath: join(rootPath, 'tsconfig.lib.json'),
+    },
   };
   return (host: Tree) => {
-    const nestCliFileExists = host.exists('nest-cli.json');
     const nestFileExists = host.exists('nest.json');
 
+    let nestCliFileExists = host.exists('nest-cli.json');
     if (!nestCliFileExists && !nestFileExists) {
-      return host;
+      host.create('nest-cli.json', '{}');
+      nestCliFileExists = true;
     }
     return updateJsonFile(
       host,
@@ -138,6 +229,17 @@ function addLibraryToCliOptions(
       (optionsFile: Record<string, any>) => {
         if (!optionsFile.projects) {
           optionsFile.projects = {} as any;
+        }
+        if (!optionsFile.compilerOptions) {
+          optionsFile.compilerOptions = {};
+        }
+        if (optionsFile.compilerOptions.webpack === undefined) {
+          optionsFile.compilerOptions.webpack = true;
+        }
+        if (optionsFile.projects[projectName]) {
+          throw new SchematicsException(
+            `Project "${projectName}" exists in this workspace already.`,
+          );
         }
         optionsFile.projects[projectName] = project;
       },
