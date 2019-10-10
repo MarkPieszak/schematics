@@ -27,7 +27,7 @@ describe('Feature Factory', () => {
 
     console.log('Feature > should manage name only');
     console.log(files);
-    
+
     expect(
       files.find(filename => filename === '/foo/foo.module.ts'),
     ).toBeDefined();
@@ -40,8 +40,6 @@ describe('Feature Factory', () => {
     expect(
       files.find(filename => filename === '/foo/foo.controller.spec.ts'),
     ).not.toBeDefined();
-
-    
 
     console.log(tree.readContent('/foo/foo.controller.ts'));
 
